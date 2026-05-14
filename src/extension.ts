@@ -113,6 +113,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 // }
                 // -----------------------
 
+                await config.update('trackingEnabled', true, vscode.ConfigurationTarget.Global);
                 client.init();
                 client.start();
                 sidebar.updateState(client.getState());

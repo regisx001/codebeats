@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import { log } from './logger';
 import { getSupabase, isSupabaseInitialized } from './supabase';
@@ -81,12 +82,12 @@ export function mapLanguageId(id: string): string {
 
 function detectEditor(): string {
     const name = vscode.env.appName.toLowerCase();
-    if (name.includes('cursor'))       return 'cursor';
-    if (name.includes('windsurf'))     return 'windsurf';
-    if (name.includes('vscodium'))     return 'vscodium';
-    if (name.includes('positron'))     return 'positron';
-    if (name.includes('void'))         return 'void';
-    if (name.includes('antigravity'))  return 'antigravity';
+    if (name.includes('cursor')) return 'cursor';
+    if (name.includes('windsurf')) return 'windsurf';
+    if (name.includes('vscodium')) return 'vscodium';
+    if (name.includes('positron')) return 'positron';
+    if (name.includes('void')) return 'void';
+    if (name.includes('antigravity')) return 'antigravity';
     return 'vscode';
 }
 
@@ -104,18 +105,26 @@ function getGitInfo(filePath: string): { project?: string; remote?: string; bran
     }
 }
 
+function getMachineUserId(): string {
+    const machineId = vscode.env.machineId;
+    // Create a deterministic UUID from the machineId
+    const hash = crypto.createHash('sha256').update(machineId).update('devtracker-salt').digest('hex');
+    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
 export class CoreClient implements vscode.Disposable {
     private state: TrackerState = { ...DEFAULT_STATE };
     private statusBarItem: vscode.StatusBarItem | null = null;
     private lastHeartbeat: number = 0;
     private heartbeatInterval: number = 30000; // 30 seconds
     private timer: NodeJS.Timeout | null = null;
+    private userId: string = getMachineUserId();
 
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly onStateChange: (state: TrackerState) => void,
         private readonly pluginVersion: string,
-        private readonly onInvalidApiKey: () => void = () => {},
+        private readonly onInvalidApiKey: () => void = () => { },
     ) {
         context.subscriptions.push(this);
     }
@@ -144,6 +153,7 @@ export class CoreClient implements vscode.Disposable {
             const { data, error } = await supabase
                 .from('daily_stats')
                 .select('total_seconds, primary_language')
+                .eq('user_id', this.userId)
                 .eq('date', new Date().toISOString().split('T')[0])
                 .maybeSingle();
 
@@ -162,7 +172,7 @@ export class CoreClient implements vscode.Disposable {
         this.ensureStatusBar();
         this.state.tracking = true;
         this.onStateChange(this.state);
-        
+
         this.timer = setInterval(() => {
             if (Date.now() - this.lastHeartbeat < 60000) {
                 this.state.todaySeconds += 60;
@@ -183,11 +193,19 @@ export class CoreClient implements vscode.Disposable {
     }
 
     async activity(filePath: string, language?: string): Promise<void> {
-        if (!this.state.tracking || !isSupabaseInitialized()) return;
+        if (!this.state.tracking) {
+            log.info('Activity ignored: tracking is disabled');
+            return;
+        }
+        if (!isSupabaseInitialized()) {
+            log.info('Activity ignored: Supabase not initialized');
+            return;
+        }
 
         const now = Date.now();
         if (now - this.lastHeartbeat < this.heartbeatInterval) return;
 
+        log.info(`Processing activity for: ${filePath} (${language})`);
         this.lastHeartbeat = now;
         this.state.language = language || null;
 
@@ -197,16 +215,20 @@ export class CoreClient implements vscode.Disposable {
         try {
             let projectId: string | null = null;
             if (git.project) {
-                const { data: project } = await supabase
+                log.info(`Syncing project: ${git.project}`);
+                const { data: project, error: pError } = await supabase
                     .from('projects')
                     .upsert({ name: git.project, remote_url: git.remote }, { onConflict: 'remote_url' })
                     .select('id')
                     .single();
+                
+                if (pError) log.error('Project upsert failed:', pError);
                 projectId = project?.id || null;
             }
 
-            await supabase.from('heartbeats').insert({
-                user_id: '00000000-0000-0000-0000-000000000000',
+            log.info('Sending heartbeat to Supabase…');
+            const { error: hError } = await supabase.from('heartbeats').insert({
+                user_id: this.userId,
                 project_id: projectId,
                 language: language,
                 file_path: git.relativePath || filePath,
@@ -214,22 +236,30 @@ export class CoreClient implements vscode.Disposable {
                 editor: detectEditor(),
                 os: process.platform,
             });
+            if (hError) {
+                log.error('Heartbeat insert failed:', hError);
+                return;
+            }
 
             const date = new Date().toISOString().split('T')[0];
             const { data: stats } = await supabase
                 .from('daily_stats')
                 .select('total_seconds')
+                .eq('user_id', this.userId)
                 .eq('date', date)
                 .maybeSingle();
 
             const newTotal = (stats?.total_seconds || 0) + 30;
-            await supabase.from('daily_stats').upsert({
-                user_id: '00000000-0000-0000-0000-000000000000',
+            const { error: sError } = await supabase.from('daily_stats').upsert({
+                user_id: this.userId,
                 date: date,
                 total_seconds: newTotal,
                 primary_language: language,
             }, { onConflict: 'user_id,date' });
 
+            if (sError) log.error('Stats upsert failed:', sError);
+
+            log.info(`Heartbeat success. Total today: ${newTotal}s`);
             this.state.todaySeconds = newTotal;
             this.updateStatusBarTime(newTotal);
             this.onStateChange(this.state);
