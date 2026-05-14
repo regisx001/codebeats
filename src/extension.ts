@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { initLogger, log } from './logger';
 import { CoreClient, mapLanguageId } from './core-client';
-import { DevGlobeSidebarProvider } from './sidebar';
+import { DevTrackerSidebarProvider } from './sidebar';
 import {
     writeSupabaseConfig,
     clearSupabaseConfig,
@@ -13,7 +13,7 @@ import {
     configPath,
     logPath,
 } from './config-writer';
-import { initSupabase } from './supabase';
+import { initSupabase, getSupabase } from './supabase';
 
 const SECRET_SUPABASE_URL = 'devtracker.supabaseUrl';
 const SECRET_SUPABASE_KEY = 'devtracker.supabaseKey';
@@ -53,14 +53,14 @@ async function getSupabaseCredentials(context: vscode.ExtensionContext): Promise
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     initLogger(context.extensionMode === vscode.ExtensionMode.Development);
-    log.info('DevGlobe activating…');
+    log.info('DevTracker activating…');
 
     const pluginVersion = getPluginVersion(context);
 
-    const sidebar = new DevGlobeSidebarProvider(context.extensionUri);
+    const sidebar = new DevTrackerSidebarProvider(context.extensionUri);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
-            DevGlobeSidebarProvider.viewType,
+            DevTrackerSidebarProvider.viewType,
             sidebar,
             { webviewOptions: { retainContextWhenHidden: true } },
         )
@@ -82,7 +82,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     sidebar.setStateGetter(() => client.getState());
 
     sidebar.setMessageHandler(async (msg) => {
-        const config = vscode.workspace.getConfiguration('devglobe');
+        const config = vscode.workspace.getConfiguration('devtracker');
 
         switch (msg.type as string) {
             case 'saveConfig': {
@@ -97,10 +97,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 writeSupabaseConfig(url, key);
 
                 initSupabase(url, key);
+
+                // --- Connection Test ---
+                // try {
+                //     const supabase = getSupabase();
+                //     const { error } = await supabase
+                //         .from('projects')
+                //         .upsert({ name: 'Connection Test', remote_url: 'test://connection' }, { onConflict: 'remote_url' });
+
+                //     if (error) throw error;
+                //     log.info('Supabase connection test successful');
+                // } catch (err) {
+                //     vscode.window.showErrorMessage(`DevTracker: Connection test failed: ${(err as Error).message}`);
+                //     break;
+                // }
+                // -----------------------
+
                 client.init();
                 client.start();
                 sidebar.updateState(client.getState());
-                vscode.window.showInformationMessage('DevTracker: Connected!');
+                vscode.window.showInformationMessage('DevTracker: Connected and verified!');
                 break;
             }
 
@@ -164,12 +180,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('devglobe.setStatus', async () => {
-            const apiKey = await getAndMigrateApiKey(context);
-            if (!apiKey) return;
+        vscode.commands.registerCommand('devtracker.setStatus', async () => {
+            const creds = await getSupabaseCredentials(context);
+            if (!creds) return;
 
             const message = await vscode.window.showInputBox({
-                prompt: 'Set your DevGlobe status message',
+                prompt: 'Set your DevTracker status message',
                 placeHolder: 'What are you working on?',
                 validateInput: (v) => (v.length > 100 ? 'Max 100 characters' : null),
             });
@@ -180,40 +196,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('devglobe.showCodingTime', () => {
+        vscode.commands.registerCommand('devtracker.showCodingTime', () => {
             const state = client.getState();
-            vscode.window.showInformationMessage(`DevGlobe: ${state.codingTime} today`);
+            vscode.window.showInformationMessage(`DevTracker: ${state.codingTime} today`);
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('devglobe.openGlobe', () => {
-            vscode.env.openExternal(vscode.Uri.parse('https://devglobe.xyz/space'));
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('devglobe.toggleDebug', async () => {
+        vscode.commands.registerCommand('devtracker.toggleDebug', async () => {
             const current = isDebugEnabled();
             const pick = await vscode.window.showQuickPick(['true', 'false'], {
-                title: 'DevGlobe Debug',
+                title: 'DevTracker Debug',
                 placeHolder: `current value: ${current}`,
             });
             if (pick === undefined) return;
             const enabled = pick === 'true';
             setDebug(enabled);
             vscode.window.showInformationMessage(
-                `DevGlobe: debug ${enabled ? 'enabled' : 'disabled'}. Restart tracking to apply.`,
+                `DevTracker: debug ${enabled ? 'enabled' : 'disabled'}. Restart tracking to apply.`,
             );
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('devglobe.openLogFile', async () => {
+        vscode.commands.registerCommand('devtracker.openLogFile', async () => {
             const p = logPath();
             if (!fs.existsSync(p)) {
                 vscode.window.showInformationMessage(
-                    'DevGlobe: log file is empty. Enable debug first (DevGlobe: Debug → true).',
+                    'DevTracker: log file is empty. Enable debug first (DevTracker: Debug → true).',
                 );
                 return;
             }
@@ -222,11 +232,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('devglobe.openConfigFile', async () => {
+        vscode.commands.registerCommand('devtracker.openConfigFile', async () => {
             const p = configPath();
             if (!fs.existsSync(p)) {
                 vscode.window.showWarningMessage(
-                    'DevGlobe: no config file yet. Run setup first.',
+                    'DevTracker: no config file yet. Run setup first.',
                 );
                 return;
             }
@@ -234,7 +244,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         })
     );
 
-    const savedConfig = vscode.workspace.getConfiguration('devglobe');
+    const savedConfig = vscode.workspace.getConfiguration('devtracker');
     const creds = await getSupabaseCredentials(context);
     const trackingEnabled = savedConfig.get<boolean>('trackingEnabled', true);
 

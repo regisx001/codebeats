@@ -12,8 +12,8 @@ type StateGetter = () => TrackerState;
  * webview sends messages back through `vscode.postMessage()` (handled via
  * `setMessageHandler()`).
  */
-export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
-    static readonly viewType = 'devglobe.sidebarView';
+export class DevTrackerSidebarProvider implements vscode.WebviewViewProvider {
+    static readonly viewType = 'devtracker.sidebarView';
 
     private view: vscode.WebviewView | null = null;
     private messageHandler: MessageHandler | null = null;
