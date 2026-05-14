@@ -5,15 +5,18 @@ import { initLogger, log } from './logger';
 import { CoreClient, mapLanguageId } from './core-client';
 import { DevGlobeSidebarProvider } from './sidebar';
 import {
-    writeApiKey,
-    clearApiKey,
+    writeSupabaseConfig,
+    clearSupabaseConfig,
+    getSupabaseConfig,
     setDebug,
     isDebugEnabled,
     configPath,
     logPath,
 } from './config-writer';
+import { initSupabase } from './supabase';
 
-const SECRET_API_KEY = 'devglobe.apiKey';
+const SECRET_SUPABASE_URL = 'devtracker.supabaseUrl';
+const SECRET_SUPABASE_KEY = 'devtracker.supabaseKey';
 
 function getPluginVersion(context: vscode.ExtensionContext): string {
     try {
@@ -27,27 +30,25 @@ function getPluginVersion(context: vscode.ExtensionContext): string {
 }
 
 /**
- * Retrieves the API key, migrating from old storage locations if needed.
- * Priority: secure storage → settings.json (legacy). Once found, writes to
- * ~/.devglobe/config.toml so the core can pick it up.
+ * Retrieves the Supabase config, migrating from old storage locations if needed.
  */
-async function getAndMigrateApiKey(context: vscode.ExtensionContext): Promise<string> {
-    const stored = await context.secrets.get(SECRET_API_KEY);
-    if (stored) {
-        writeApiKey(stored);
-        return stored;
+async function getSupabaseCredentials(context: vscode.ExtensionContext): Promise<{ url: string; key: string } | null> {
+    const url = await context.secrets.get(SECRET_SUPABASE_URL);
+    const key = await context.secrets.get(SECRET_SUPABASE_KEY);
+
+    if (url && key) {
+        writeSupabaseConfig(url, key);
+        return { url, key };
     }
 
-    const config = vscode.workspace.getConfiguration('devglobe');
-    const legacy = config.get<string>('apiKey', '');
-    if (legacy) {
-        await context.secrets.store(SECRET_API_KEY, legacy);
-        await config.update('apiKey', undefined, vscode.ConfigurationTarget.Global);
-        writeApiKey(legacy);
-        log.info('API key migrated from settings.json to secure storage + config.toml');
-        return legacy;
+    const local = getSupabaseConfig();
+    if (local) {
+        await context.secrets.store(SECRET_SUPABASE_URL, local.url);
+        await context.secrets.store(SECRET_SUPABASE_KEY, local.key);
+        return local;
     }
-    return '';
+
+    return null;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -65,17 +66,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         )
     );
 
-    const onInvalidApiKey = async (): Promise<void> => {
-        await context.secrets.delete(SECRET_API_KEY);
-        clearApiKey();
-        log.info('API key cleared after server rejected it (401)');
+    const onInvalidConfig = async (): Promise<void> => {
+        await context.secrets.delete(SECRET_SUPABASE_URL);
+        await context.secrets.delete(SECRET_SUPABASE_KEY);
+        clearSupabaseConfig();
+        log.info('Supabase config cleared after connection failure');
     };
 
     const client = new CoreClient(
         context,
         (state) => sidebar.updateState(state),
         pluginVersion,
-        () => { void onInvalidApiKey(); },
+        () => { void onInvalidConfig(); },
     );
     sidebar.setStateGetter(() => client.getState());
 
@@ -83,18 +85,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const config = vscode.workspace.getConfiguration('devglobe');
 
         switch (msg.type as string) {
-            case 'saveToken': {
-                const token = String(msg.token ?? '').trim();
-                if (!token) {
-                    vscode.window.showErrorMessage('DevGlobe: API key is empty.');
+            case 'saveConfig': {
+                const url = String(msg.url ?? '').trim();
+                const key = String(msg.key ?? '').trim();
+                if (!url || !key) {
+                    vscode.window.showErrorMessage('DevTracker: Supabase URL and Key are required.');
                     break;
                 }
-                await context.secrets.store(SECRET_API_KEY, token);
-                writeApiKey(token);
+                await context.secrets.store(SECRET_SUPABASE_URL, url);
+                await context.secrets.store(SECRET_SUPABASE_KEY, key);
+                writeSupabaseConfig(url, key);
+
+                initSupabase(url, key);
                 client.init();
                 client.start();
                 sidebar.updateState(client.getState());
-                vscode.window.showInformationMessage('DevGlobe: Connected!');
+                vscode.window.showInformationMessage('DevTracker: Connected!');
                 break;
             }
 
@@ -107,35 +113,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             case 'stopTracking': {
                 await config.update('trackingEnabled', false, vscode.ConfigurationTarget.Global);
                 client.pause();
-                vscode.window.showInformationMessage('DevGlobe: Tracking stopped.');
+                vscode.window.showInformationMessage('DevTracker: Tracking stopped.');
                 break;
             }
 
             case 'startTracking': {
-                const apiKey = await getAndMigrateApiKey(context);
-                if (!apiKey) break;
+                const creds = await getSupabaseCredentials(context);
+                if (!creds) break;
                 await config.update('trackingEnabled', true, vscode.ConfigurationTarget.Global);
+
+                initSupabase(creds.url, creds.key);
                 client.init();
                 client.start();
-                vscode.window.showInformationMessage('DevGlobe: Tracking started.');
+                vscode.window.showInformationMessage('DevTracker: Tracking started.');
                 break;
             }
 
             case 'disconnect': {
-                await context.secrets.delete(SECRET_API_KEY);
-                clearApiKey();
+                await context.secrets.delete(SECRET_SUPABASE_URL);
+                await context.secrets.delete(SECRET_SUPABASE_KEY);
+                clearSupabaseConfig();
                 client.reset();
-                vscode.window.showInformationMessage('DevGlobe: Disconnected.');
+                vscode.window.showInformationMessage('DevTracker: Disconnected.');
                 break;
             }
 
             case 'openExternal': {
                 const url = String(msg.url ?? '');
                 try {
-                    const parsed = vscode.Uri.parse(url);
-                    if (parsed.scheme === 'https' && parsed.authority.endsWith('devglobe.xyz')) {
-                        vscode.env.openExternal(parsed);
-                    }
+                    vscode.env.openExternal(vscode.Uri.parse(url));
                 } catch {
                     // invalid URL, ignore
                 }
@@ -229,13 +235,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     const savedConfig = vscode.workspace.getConfiguration('devglobe');
-    const apiKey = await getAndMigrateApiKey(context);
+    const creds = await getSupabaseCredentials(context);
     const trackingEnabled = savedConfig.get<boolean>('trackingEnabled', true);
 
-    if (apiKey && trackingEnabled) {
+    if (creds && trackingEnabled) {
+        initSupabase(creds.url, creds.key);
         client.init();
         client.start();
-    } else if (apiKey) {
+    } else if (creds) {
+        initSupabase(creds.url, creds.key);
         client.init();
         sidebar.updateState(client.getState());
     } else {

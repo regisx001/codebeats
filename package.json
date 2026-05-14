@@ -1,41 +1,31 @@
 {
-  "name": "devglobe",
-  "displayName": "DevGlobe",
-  "description": "Show your live coding presence on the DevGlobe world map. Track coding time, languages, repos, and stats.",
-  "version": "2.0.0",
-  "publisher": "devglobe",
+  "name": "devtracker",
+  "displayName": "DevTracker",
+  "description": "Private development tracker with Supabase backend. Track coding time, languages, and repos privately.",
+  "version": "1.0.0",
+  "publisher": "private",
   "icon": "media/logo.png",
   "license": "MIT",
-  "homepage": "https://devglobe.xyz",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Nako0/devglobe-extension"
-  },
-  "bugs": {
-    "url": "https://github.com/Nako0/devglobe-extension/issues"
-  },
   "engines": {
     "vscode": "^1.80.0"
   },
-  "categories": ["Visualization", "Other"],
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
   "keywords": [
-    "devglobe",
-    "globe",
-    "wakatime",
+    "devtracker",
+    "supabase",
     "time tracking",
     "coding stats",
-    "leaderboard",
-    "developer profile",
-    "presence"
+    "private"
   ],
-  "galleryBanner": {
-    "color": "#115bca",
-    "theme": "dark"
-  },
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "scripts": {
-    "compile": "tsc -p ./ && cp ../devglobe-core/dist/devglobe-core.js out/",
+    "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile"
   },
@@ -48,56 +38,55 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "devglobe-sidebar",
-          "title": "DevGlobe",
+          "id": "devtracker-sidebar",
+          "title": "DevTracker",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "devglobe-sidebar": [
+      "devtracker-sidebar": [
         {
           "type": "webview",
-          "id": "devglobe.sidebarView",
-          "name": "DevGlobe"
+          "id": "devtracker.sidebarView",
+          "name": "DevTracker"
         }
       ]
     },
     "commands": [
       {
-        "command": "devglobe.setStatus",
-        "title": "DevGlobe: Set Status Message"
+        "command": "devtracker.setStatus",
+        "title": "DevTracker: Set Status Message"
       },
       {
-        "command": "devglobe.showCodingTime",
-        "title": "DevGlobe: Show Coding Time"
+        "command": "devtracker.showCodingTime",
+        "title": "DevTracker: Show Coding Time"
       },
       {
-        "command": "devglobe.openGlobe",
-        "title": "DevGlobe: Open Globe"
+        "command": "devtracker.toggleDebug",
+        "title": "DevTracker: Debug"
       },
       {
-        "command": "devglobe.toggleDebug",
-        "title": "DevGlobe: Debug"
+        "command": "devtracker.openLogFile",
+        "title": "DevTracker: Open Log File…"
       },
       {
-        "command": "devglobe.openLogFile",
-        "title": "DevGlobe: Open Log File…"
-      },
-      {
-        "command": "devglobe.openConfigFile",
-        "title": "DevGlobe: Open Config File…"
+        "command": "devtracker.openConfigFile",
+        "title": "DevTracker: Open Config File…"
       }
     ],
     "configuration": {
-      "title": "DevGlobe",
+      "title": "DevTracker",
       "properties": {
-        "devglobe.trackingEnabled": {
+        "devtracker.trackingEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Whether DevGlobe heartbeat tracking is active"
+          "description": "Whether DevTracker heartbeat tracking is active"
         }
       }
     }
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.4"
   }
 }

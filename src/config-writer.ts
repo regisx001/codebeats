@@ -2,9 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const DEVGLOBE_DIR = path.join(os.homedir(), '.devglobe');
-const CONFIG_PATH = path.join(DEVGLOBE_DIR, 'config.toml');
-const LOG_PATH = path.join(DEVGLOBE_DIR, 'devglobe.log');
+const DEVTRACKER_DIR = path.join(os.homedir(), '.devtracker');
+const CONFIG_PATH = path.join(DEVTRACKER_DIR, 'config.toml');
+const LOG_PATH = path.join(DEVTRACKER_DIR, 'devtracker.log');
 
 export function configPath(): string {
     return CONFIG_PATH;
@@ -29,8 +29,8 @@ export function isDebugEnabled(): boolean {
 }
 
 export function setDebug(enabled: boolean): void {
-    if (!fs.existsSync(DEVGLOBE_DIR)) {
-        fs.mkdirSync(DEVGLOBE_DIR, { recursive: true });
+    if (!fs.existsSync(DEVTRACKER_DIR)) {
+        fs.mkdirSync(DEVTRACKER_DIR, { recursive: true });
     }
 
     let content = '';
@@ -71,13 +71,11 @@ export function setDebug(enabled: boolean): void {
 }
 
 /**
- * Writes the API key to ~/.devglobe/config.toml so the core (running as a
- * subprocess) can pick it up on next init. Preserves other settings already
- * present in the file.
+ * Writes the Supabase credentials to ~/.devtracker/config.toml.
  */
-export function writeApiKey(apiKey: string): void {
-    if (!fs.existsSync(DEVGLOBE_DIR)) {
-        fs.mkdirSync(DEVGLOBE_DIR, { recursive: true });
+export function writeSupabaseConfig(url: string, key: string): void {
+    if (!fs.existsSync(DEVTRACKER_DIR)) {
+        fs.mkdirSync(DEVTRACKER_DIR, { recursive: true });
     }
 
     let content = '';
@@ -86,7 +84,8 @@ export function writeApiKey(apiKey: string): void {
     }
 
     const lines = content.split('\n');
-    let inserted = false;
+    let urlInserted = false;
+    let keyInserted = false;
     let beforeSection = true;
     const updated: string[] = [];
 
@@ -94,26 +93,31 @@ export function writeApiKey(apiKey: string): void {
         const line = rawLine.trim();
         if (line.startsWith('[')) beforeSection = false;
 
-        if (beforeSection && line.startsWith('api_key')) {
-            updated.push(`api_key = "${apiKey}"`);
-            inserted = true;
+        if (beforeSection && line.startsWith('supabase_url')) {
+            updated.push(`supabase_url = "${url}"`);
+            urlInserted = true;
+        } else if (beforeSection && line.startsWith('supabase_key')) {
+            updated.push(`supabase_key = "${key}"`);
+            keyInserted = true;
+        } else if (beforeSection && line.startsWith('api_key')) {
+            // Remove legacy api_key
+            continue;
         } else {
             updated.push(rawLine);
         }
     }
 
-    if (!inserted) {
-        updated.unshift(`api_key = "${apiKey}"`);
-    }
+    if (!urlInserted) updated.unshift(`supabase_url = "${url}"`);
+    if (!keyInserted) updated.splice(urlInserted ? 1 : 1, 0, `supabase_key = "${key}"`);
 
     const output = updated.join('\n').replace(/\n{3,}/g, '\n\n');
     fs.writeFileSync(CONFIG_PATH, output.endsWith('\n') ? output : output + '\n', { mode: 0o600 });
 }
 
 /**
- * Deletes the API key from the config file (sets it to empty).
+ * Deletes the Supabase credentials from the config file.
  */
-export function clearApiKey(): void {
+export function clearSupabaseConfig(): void {
     if (!fs.existsSync(CONFIG_PATH)) return;
     const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
     const lines = content.split('\n');
@@ -123,9 +127,31 @@ export function clearApiKey(): void {
     for (const rawLine of lines) {
         const line = rawLine.trim();
         if (line.startsWith('[')) beforeSection = false;
-        if (beforeSection && line.startsWith('api_key')) continue;
+        if (beforeSection && (line.startsWith('supabase_url') || line.startsWith('supabase_key') || line.startsWith('api_key'))) continue;
         updated.push(rawLine);
     }
 
     fs.writeFileSync(CONFIG_PATH, updated.join('\n'), { mode: 0o600 });
+}
+
+export function getSupabaseConfig(): { url: string; key: string } | null {
+    if (!fs.existsSync(CONFIG_PATH)) return null;
+    const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    let url = '';
+    let key = '';
+    let beforeSection = true;
+
+    for (const rawLine of content.split('\n')) {
+        const line = rawLine.trim();
+        if (line.startsWith('[')) beforeSection = false;
+        if (!beforeSection) continue;
+
+        const urlMatch = line.match(/^supabase_url\s*=\s*"(.*)"/);
+        if (urlMatch) url = urlMatch[1];
+
+        const keyMatch = line.match(/^supabase_key\s*=\s*"(.*)"/);
+        if (keyMatch) key = keyMatch[1];
+    }
+
+    return url && key ? { url, key } : null;
 }

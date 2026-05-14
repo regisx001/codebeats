@@ -19,7 +19,7 @@ export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
     private messageHandler: MessageHandler | null = null;
     private stateGetter: StateGetter | null = null;
 
-    constructor(private readonly extensionUri: vscode.Uri) {}
+    constructor(private readonly extensionUri: vscode.Uri) { }
 
     setMessageHandler(handler: MessageHandler): void {
         this.messageHandler = handler;
@@ -236,17 +236,26 @@ export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
     <!-- Not connected -->
     <div id="login-section">
         <div class="section">
-            <h3>Connect to DevGlobe</h3>
-            <input type="password" id="token-input" placeholder="Paste your API key" />
+            <h3>Connect to Supabase</h3>
+            <div style="margin-bottom: 8px;">
+                <label style="font-size: 10px; opacity: 0.8;">Supabase URL</label>
+                <input type="text" id="supabase-url" placeholder="https://your-project.supabase.co" />
+            </div>
+            <div style="margin-bottom: 8px;">
+                <label style="font-size: 10px; opacity: 0.8;">Supabase Key</label>
+                <input type="password" id="supabase-key" placeholder="Paste your API key" />
+            </div>
             <button id="connect-btn">Connect</button>
-            <a class="link" id="get-key-link">Get your API key on devglobe.xyz</a>
+            <div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 12px; line-height: 1.4;">
+                Get your credentials from the <a class="link" id="get-key-link" style="margin: 0;">Supabase Dashboard</a> under Project Settings > API.
+            </div>
         </div>
     </div>
 
     <!-- Connected -->
     <div id="dashboard-section" class="hidden">
         <div class="section">
-            <h3>Dashboard</h3>
+            <h3>DevTracker Dashboard</h3>
             <div class="stat-row">
                 <span class="stat-label">Coding today</span>
                 <span class="stat-value" id="coding-time">0m</span>
@@ -264,9 +273,6 @@ export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
             <div class="status-row">
                 <input type="text" id="status-input" placeholder="What are you working on?" maxlength="100" />
                 <button class="secondary" id="status-btn">Set</button>
-            </div>
-            <div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 6px; line-height: 1.4;">
-                Privacy &amp; visibility settings are managed on <a class="link" id="settings-link" style="margin: 0;">devglobe.xyz</a>.
             </div>
         </div>
 
@@ -288,14 +294,14 @@ export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
 
     const loginSection     = document.getElementById('login-section');
     const dashboardSection = document.getElementById('dashboard-section');
-    const tokenInput       = document.getElementById('token-input');
+    const supabaseUrl      = document.getElementById('supabase-url');
+    const supabaseKey      = document.getElementById('supabase-key');
     const connectBtn       = document.getElementById('connect-btn');
     const getKeyLink       = document.getElementById('get-key-link');
     const codingTime       = document.getElementById('coding-time');
     const activeLang       = document.getElementById('active-lang');
     const statusInput      = document.getElementById('status-input');
     const statusBtn        = document.getElementById('status-btn');
-    const settingsLink     = document.getElementById('settings-link');
     const btnStop          = document.getElementById('btn-stop');
     const btnStart         = document.getElementById('btn-start');
     const disconnectBtn    = document.getElementById('disconnect-btn');
@@ -310,20 +316,17 @@ export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     connectBtn.addEventListener('click', () => {
-        const token = tokenInput.value.trim();
-        if (token) vscode.postMessage({ type: 'saveToken', token });
-    });
-
-    tokenInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') connectBtn.click();
+        const url = supabaseUrl.value.trim();
+        const key = supabaseKey.value.trim();
+        if (url && key) {
+            vscode.postMessage({ type: 'saveConfig', url, key });
+        } else {
+            showToast('Please fill both fields');
+        }
     });
 
     getKeyLink.addEventListener('click', () => {
-        vscode.postMessage({ type: 'openExternal', url: 'https://devglobe.xyz/dashboard/settings' });
-    });
-
-    settingsLink.addEventListener('click', () => {
-        vscode.postMessage({ type: 'openExternal', url: 'https://devglobe.xyz/dashboard/settings' });
+        vscode.postMessage({ type: 'openExternal', url: 'https://supabase.com/dashboard/project/_/settings/api' });
     });
 
     statusBtn.addEventListener('click', () => {
@@ -357,7 +360,8 @@ export class DevGlobeSidebarProvider implements vscode.WebviewViewProvider {
             } else {
                 loginSection.classList.remove('hidden');
                 dashboardSection.classList.add('hidden');
-                tokenInput.value = '';
+                supabaseUrl.value = '';
+                supabaseKey.value = '';
             }
         }
     });
