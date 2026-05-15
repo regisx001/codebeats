@@ -4,6 +4,7 @@
   "description": "Private development tracker with Supabase backend. Track coding time, languages, and repos privately.",
   "version": "1.0.0",
   "publisher": "private",
+  "repository": "https://github.com/regisx001/DevTracker.git",
   "icon": "media/logo.png",
   "license": "MIT",
   "engines": {
