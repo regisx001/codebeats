@@ -1,4 +1,4 @@
-<h1 align="center">DevTracker for VS Code</h1>
+<h1 align="center">CodeBeats for VS Code</h1>
 
 <p align="center">
   <strong>Private development tracker with Supabase backend.</strong><br/>
@@ -26,7 +26,7 @@
 
 ## Setup & Installation
 
-DevTracker requires a Supabase instance to store your data. 
+CodeBeats requires a Supabase instance to store your data. 
 
 ### 1. Database Setup
 Before connecting the extension, you need to set up the database tables.
@@ -36,7 +36,7 @@ Before connecting the extension, you need to set up the database tables.
 4. Run the script to create the required tables (`projects`, `heartbeats`, `daily_stats`, `status_messages`) and Row Level Security (RLS) policies.
 
 ### 2. Connect the Extension
-1. Open the **DevTracker** sidebar in VS Code (the clock/tracker icon in the activity bar).
+1. Open the **CodeBeats** sidebar in VS Code (the clock/tracker icon in the activity bar).
 2. Enter your **Supabase Project ID** (or full URL) and your **API Key** (anon public key).
 3. Click **Connect**. 
 4. The extension will verify the connection and confirm that the database schema is correctly set up.
@@ -49,11 +49,11 @@ Accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 | Command | Description |
 |---------|-------------|
-| `DevTracker: Set Status Message` | Set your status message (saved to Supabase) |
-| `DevTracker: Show Coding Time` | Show your coding time today |
-| `DevTracker: Debug` | Toggle debug logging |
-| `DevTracker: Open Log File…` | Open the DevTracker log file |
-| `DevTracker: Open Config File…` | Open the local configuration file |
+| `CodeBeats: Set Status Message` | Set your status message (saved to Supabase) |
+| `CodeBeats: Show Coding Time` | Show your coding time today |
+| `CodeBeats: Debug` | Toggle debug logging |
+| `CodeBeats: Open Log File…` | Open the CodeBeats log file |
+| `CodeBeats: Open Config File…` | Open the local configuration file |
 
 ---
 
@@ -61,7 +61,7 @@ Accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `devtracker.trackingEnabled` | `true` | Enable or disable heartbeat tracking |
+| `codebeats.trackingEnabled` | `true` | Enable or disable heartbeat tracking |
 
 ---
 

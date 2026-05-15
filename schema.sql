@@ -1,5 +1,5 @@
 -- ============================================================
--- DevTracker — Supabase Database Schema
+-- CodeBeats — Supabase Database Schema
 -- ============================================================
 -- Run this ONCE in your Supabase SQL Editor:
 --   https://supabase.com/dashboard/project/_/sql
@@ -68,22 +68,22 @@ ALTER TABLE public.status_messages ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies if re-running this script
 DO $$ BEGIN
-    DROP POLICY IF EXISTS "devtracker_all" ON public.projects;
-    DROP POLICY IF EXISTS "devtracker_all" ON public.heartbeats;
-    DROP POLICY IF EXISTS "devtracker_all" ON public.daily_stats;
-    DROP POLICY IF EXISTS "devtracker_all" ON public.status_messages;
+    DROP POLICY IF EXISTS "codebeats_all" ON public.projects;
+    DROP POLICY IF EXISTS "codebeats_all" ON public.heartbeats;
+    DROP POLICY IF EXISTS "codebeats_all" ON public.daily_stats;
+    DROP POLICY IF EXISTS "codebeats_all" ON public.status_messages;
 END $$;
 
-CREATE POLICY "devtracker_all" ON public.projects
+CREATE POLICY "codebeats_all" ON public.projects
     FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "devtracker_all" ON public.heartbeats
+CREATE POLICY "codebeats_all" ON public.heartbeats
     FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "devtracker_all" ON public.daily_stats
+CREATE POLICY "codebeats_all" ON public.daily_stats
     FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "devtracker_all" ON public.status_messages
+CREATE POLICY "codebeats_all" ON public.status_messages
     FOR ALL USING (true) WITH CHECK (true);
 
 -- 4. Permissions ─────────────────────────────────────────────

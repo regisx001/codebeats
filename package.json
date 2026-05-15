@@ -1,10 +1,10 @@
 {
-  "name": "devtracker",
-  "displayName": "DevTracker",
+  "name": "codebeats",
+  "displayName": "CodeBeats",
   "description": "Private development tracker with Supabase backend. Track coding time, languages, and repos privately.",
   "version": "1.0.0",
-  "publisher": "private",
-  "repository": "https://github.com/regisx001/DevTracker.git",
+  "publisher": "regisx001",
+  "repository": "https://github.com/regisx001/CodeBeats.git",
   "icon": "media/logo.png",
   "license": "MIT",
   "engines": {
@@ -15,7 +15,7 @@
     "Other"
   ],
   "keywords": [
-    "devtracker",
+    "codebeats",
     "supabase",
     "time tracking",
     "coding stats",
@@ -28,7 +28,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "bun run compile"
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
@@ -39,50 +39,50 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "devtracker-sidebar",
-          "title": "DevTracker",
+          "id": "codebeats-sidebar",
+          "title": "CodeBeats",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "devtracker-sidebar": [
+      "codebeats-sidebar": [
         {
           "type": "webview",
-          "id": "devtracker.sidebarView",
-          "name": "DevTracker"
+          "id": "codebeats.sidebarView",
+          "name": "CodeBeats"
         }
       ]
     },
     "commands": [
       {
-        "command": "devtracker.setStatus",
-        "title": "DevTracker: Set Status Message"
+        "command": "codebeats.setStatus",
+        "title": "CodeBeats: Set Status Message"
       },
       {
-        "command": "devtracker.showCodingTime",
-        "title": "DevTracker: Show Coding Time"
+        "command": "codebeats.showCodingTime",
+        "title": "CodeBeats: Show Coding Time"
       },
       {
-        "command": "devtracker.toggleDebug",
-        "title": "DevTracker: Debug"
+        "command": "codebeats.toggleDebug",
+        "title": "CodeBeats: Debug"
       },
       {
-        "command": "devtracker.openLogFile",
-        "title": "DevTracker: Open Log File…"
+        "command": "codebeats.openLogFile",
+        "title": "CodeBeats: Open Log File…"
       },
       {
-        "command": "devtracker.openConfigFile",
-        "title": "DevTracker: Open Config File…"
+        "command": "codebeats.openConfigFile",
+        "title": "CodeBeats: Open Config File…"
       }
     ],
     "configuration": {
-      "title": "DevTracker",
+      "title": "CodeBeats",
       "properties": {
-        "devtracker.trackingEnabled": {
+        "codebeats.trackingEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Whether DevTracker heartbeat tracking is active"
+          "description": "Whether CodeBeats heartbeat tracking is active"
         }
       }
     }

@@ -7,14 +7,14 @@ type MessageHandler = (msg: Record<string, unknown>) => void;
 type StateGetter = () => TrackerState;
 
 /**
- * Provides the DevTracker sidebar webview.
+ * Provides the CodeBeats sidebar webview.
  *
  * Communication: `updateState(state)` and `postLeaderboard(data)` push data
  * into the webview; the webview sends messages back through `vscode.postMessage()`
  * handled via `setMessageHandler()`.
  */
-export class DevTrackerSidebarProvider implements vscode.WebviewViewProvider {
-    static readonly viewType = 'devtracker.sidebarView';
+export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
+    static readonly viewType = 'codebeats.sidebarView';
 
     private view: vscode.WebviewView | null = null;
     private messageHandler: MessageHandler | null = null;

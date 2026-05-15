@@ -135,7 +135,7 @@ function getMachineUserId(): string {
     const hash = crypto
         .createHash('sha256')
         .update(vscode.env.machineId)
-        .update('devtracker-salt')
+        .update('codebeats-salt')
         .digest('hex');
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 }
@@ -339,7 +339,7 @@ export class CoreClient implements vscode.Disposable {
                 log.error('Error saving status message:', err);
             }
         }
-        vscode.window.showInformationMessage(`DevTracker: Status set to "${message}"`);
+        vscode.window.showInformationMessage(`CodeBeats: Status set to "${message}"`);
     }
 
     reset(): void {
@@ -355,7 +355,7 @@ export class CoreClient implements vscode.Disposable {
             return;
         }
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        this.statusBarItem.tooltip = 'DevTracker: Coding time today';
+        this.statusBarItem.tooltip = 'CodeBeats: Coding time today';
         this.statusBarItem.text = '$(clock) 0m';
         this.statusBarItem.show();
         this.context.subscriptions.push(this.statusBarItem);
@@ -368,7 +368,7 @@ export class CoreClient implements vscode.Disposable {
         const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
         this.state.codingTime = label;
         this.statusBarItem.text = `$(clock) ${label}`;
-        this.statusBarItem.tooltip = `DevTracker: ${label} coded today`;
+        this.statusBarItem.tooltip = `CodeBeats: ${label} coded today`;
         this.statusBarItem.show();
     }
 }

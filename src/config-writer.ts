@@ -2,9 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const DEVTRACKER_DIR = path.join(os.homedir(), '.devtracker');
-const CONFIG_PATH = path.join(DEVTRACKER_DIR, 'config.toml');
-const LOG_PATH = path.join(DEVTRACKER_DIR, 'devtracker.log');
+const CODEBEATS_DIR = path.join(os.homedir(), '.codebeats');
+const CONFIG_PATH = path.join(CODEBEATS_DIR, 'config.toml');
+const LOG_PATH = path.join(CODEBEATS_DIR, 'codebeats.log');
 
 export function configPath(): string {
     return CONFIG_PATH;
@@ -29,8 +29,8 @@ export function isDebugEnabled(): boolean {
 }
 
 export function setDebug(enabled: boolean): void {
-    if (!fs.existsSync(DEVTRACKER_DIR)) {
-        fs.mkdirSync(DEVTRACKER_DIR, { recursive: true });
+    if (!fs.existsSync(CODEBEATS_DIR)) {
+        fs.mkdirSync(CODEBEATS_DIR, { recursive: true });
     }
 
     let content = '';
@@ -71,11 +71,11 @@ export function setDebug(enabled: boolean): void {
 }
 
 /**
- * Writes the Supabase credentials to ~/.devtracker/config.toml.
+ * Writes the Supabase credentials to ~/.codebeats/config.toml.
  */
 export function writeSupabaseConfig(url: string, key: string): void {
-    if (!fs.existsSync(DEVTRACKER_DIR)) {
-        fs.mkdirSync(DEVTRACKER_DIR, { recursive: true });
+    if (!fs.existsSync(CODEBEATS_DIR)) {
+        fs.mkdirSync(CODEBEATS_DIR, { recursive: true });
     }
 
     let content = '';
