@@ -6,7 +6,7 @@ type MessageHandler = (msg: Record<string, unknown>) => void;
 type StateGetter = () => TrackerState;
 
 /**
- * Provides the DevGlobe sidebar webview.
+ * Provides the DevTracker sidebar webview.
  *
  * Communication: `updateState(state)` pushes state into the webview, and the
  * webview sends messages back through `vscode.postMessage()` (handled via

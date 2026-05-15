@@ -17,9 +17,9 @@ export function initLogger(isDev: boolean): void {
 
 export const log = {
     debug: (...args: unknown[]) => {
-        if (devMode) console.log('[DevGlobe]', ...args);
+        if (devMode) console.log('[DevTracker]', ...args);
     },
-    info:  (...args: unknown[]) => console.log('[DevGlobe]', ...args),
-    warn:  (...args: unknown[]) => console.warn('[DevGlobe]', ...args),
-    error: (...args: unknown[]) => console.error('[DevGlobe]', ...args),
+    info:  (...args: unknown[]) => console.log('[DevTracker]', ...args),
+    warn:  (...args: unknown[]) => console.warn('[DevTracker]', ...args),
+    error: (...args: unknown[]) => console.error('[DevTracker]', ...args),
 };

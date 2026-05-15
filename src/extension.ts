@@ -13,7 +13,7 @@ import {
     configPath,
     logPath,
 } from './config-writer';
-import { initSupabase, getSupabase } from './supabase';
+import { initSupabase, getSupabase, testConnection } from './supabase';
 
 const SECRET_SUPABASE_URL = 'devtracker.supabaseUrl';
 const SECRET_SUPABASE_KEY = 'devtracker.supabaseKey';
@@ -30,7 +30,8 @@ function getPluginVersion(context: vscode.ExtensionContext): string {
 }
 
 /**
- * Retrieves the Supabase config, migrating from old storage locations if needed.
+ * Retrieves the Supabase credentials from SecretStorage or the local config file.
+ * If found in the local file but not in secrets, migrates them to SecretStorage.
  */
 async function getSupabaseCredentials(context: vscode.ExtensionContext): Promise<{ url: string; key: string } | null> {
     const url = await context.secrets.get(SECRET_SUPABASE_URL);
@@ -41,6 +42,7 @@ async function getSupabaseCredentials(context: vscode.ExtensionContext): Promise
         return { url, key };
     }
 
+    // Migrate from local config file if present
     const local = getSupabaseConfig();
     if (local) {
         await context.secrets.store(SECRET_SUPABASE_URL, local.url);
@@ -57,6 +59,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const pluginVersion = getPluginVersion(context);
 
+    // ── Sidebar ──────────────────────────────────────────────────
     const sidebar = new DevTrackerSidebarProvider(context.extensionUri);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
@@ -66,6 +69,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         )
     );
 
+    // ── Invalid-config handler ───────────────────────────────────
     const onInvalidConfig = async (): Promise<void> => {
         await context.secrets.delete(SECRET_SUPABASE_URL);
         await context.secrets.delete(SECRET_SUPABASE_KEY);
@@ -73,6 +77,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         log.info('Supabase config cleared after connection failure');
     };
 
+    // ── Core tracking client ─────────────────────────────────────
     const client = new CoreClient(
         context,
         (state) => sidebar.updateState(state),
@@ -81,6 +86,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     sidebar.setStateGetter(() => client.getState());
 
+    // ── Message handler from the sidebar webview ─────────────────
     sidebar.setMessageHandler(async (msg) => {
         const config = vscode.workspace.getConfiguration('devtracker');
 
@@ -92,32 +98,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     vscode.window.showErrorMessage('DevTracker: Supabase URL and Key are required.');
                     break;
                 }
+
+                // Store credentials
                 await context.secrets.store(SECRET_SUPABASE_URL, url);
                 await context.secrets.store(SECRET_SUPABASE_KEY, key);
                 writeSupabaseConfig(url, key);
 
+                // Initialize client and test the connection
                 initSupabase(url, key);
 
-                // --- Connection Test ---
-                // try {
-                //     const supabase = getSupabase();
-                //     const { error } = await supabase
-                //         .from('projects')
-                //         .upsert({ name: 'Connection Test', remote_url: 'test://connection' }, { onConflict: 'remote_url' });
+                const result = await testConnection();
+                if (!result.ok) {
+                    vscode.window.showErrorMessage(
+                        `DevTracker: Connection failed — ${result.error}. ` +
+                        'Make sure you ran the schema.sql in your Supabase SQL Editor.',
+                    );
+                    log.error('Connection test failed:', result.error);
+                    // Clean up stored creds since they didn't work
+                    await context.secrets.delete(SECRET_SUPABASE_URL);
+                    await context.secrets.delete(SECRET_SUPABASE_KEY);
+                    clearSupabaseConfig();
+                    break;
+                }
 
-                //     if (error) throw error;
-                //     log.info('Supabase connection test successful');
-                // } catch (err) {
-                //     vscode.window.showErrorMessage(`DevTracker: Connection test failed: ${(err as Error).message}`);
-                //     break;
-                // }
-                // -----------------------
-
+                log.info('Supabase connection test successful');
                 await config.update('trackingEnabled', true, vscode.ConfigurationTarget.Global);
                 client.init();
                 client.start();
                 sidebar.updateState(client.getState());
-                vscode.window.showInformationMessage('DevTracker: Connected and verified!');
+                vscode.window.showInformationMessage('DevTracker: Connected and verified! ✓');
                 break;
             }
 
@@ -130,19 +139,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             case 'stopTracking': {
                 await config.update('trackingEnabled', false, vscode.ConfigurationTarget.Global);
                 client.pause();
-                vscode.window.showInformationMessage('DevTracker: Tracking stopped.');
+                vscode.window.showInformationMessage('DevTracker: Tracking paused.');
                 break;
             }
 
             case 'startTracking': {
                 const creds = await getSupabaseCredentials(context);
-                if (!creds) break;
+                if (!creds) {
+                    vscode.window.showWarningMessage('DevTracker: No credentials found. Please connect first.');
+                    break;
+                }
                 await config.update('trackingEnabled', true, vscode.ConfigurationTarget.Global);
-
                 initSupabase(creds.url, creds.key);
                 client.init();
                 client.start();
-                vscode.window.showInformationMessage('DevTracker: Tracking started.');
+                vscode.window.showInformationMessage('DevTracker: Tracking resumed.');
                 break;
             }
 
@@ -167,10 +178,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
     });
 
-    // The core debounces, so we just forward every editor event.
+    // ── Editor activity forwarding ───────────────────────────────
     function reportActivity(doc: vscode.TextDocument): void {
         if (doc.uri.scheme !== 'file') return;
-        client.activity(doc.uri.fsPath, mapLanguageId(doc.languageId));
+        void client.activity(doc.uri.fsPath, mapLanguageId(doc.languageId));
     }
 
     context.subscriptions.push(
@@ -180,6 +191,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
     );
 
+    // ── Commands ─────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('devtracker.setStatus', async () => {
             const creds = await getSupabaseCredentials(context);
@@ -245,6 +257,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         })
     );
 
+    // ── Auto-start on activation ─────────────────────────────────
     const savedConfig = vscode.workspace.getConfiguration('devtracker');
     const creds = await getSupabaseCredentials(context);
     const trackingEnabled = savedConfig.get<boolean>('trackingEnabled', true);
@@ -253,15 +266,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         initSupabase(creds.url, creds.key);
         client.init();
         client.start();
+        log.info('DevTracker activated — tracking started.');
     } else if (creds) {
         initSupabase(creds.url, creds.key);
         client.init();
         sidebar.updateState(client.getState());
+        log.info('DevTracker activated — connected but tracking paused.');
     } else {
         sidebar.updateState(client.getState());
+        log.info('DevTracker activated — no credentials configured.');
     }
-
-    log.info('DevGlobe activated.');
 }
 
 export function deactivate(): void {

@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as os from 'os';
 import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import { log } from './logger';
@@ -94,10 +93,17 @@ function detectEditor(): string {
 function getGitInfo(filePath: string): { project?: string; remote?: string; branch?: string; relativePath?: string } {
     try {
         const dir = path.dirname(filePath);
-        const root = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf8' }).trim();
+        const root = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf8', timeout: 5000 }).trim();
         const project = path.basename(root);
-        const remote = execSync('git remote get-url origin', { cwd: dir, encoding: 'utf8' }).trim();
-        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, encoding: 'utf8' }).trim();
+
+        let remote: string | undefined;
+        try {
+            remote = execSync('git remote get-url origin', { cwd: dir, encoding: 'utf8', timeout: 5000 }).trim();
+        } catch {
+            // No remote configured — that's fine
+        }
+
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, encoding: 'utf8', timeout: 5000 }).trim();
         const relativePath = path.relative(root, filePath);
         return { project, remote, branch, relativePath };
     } catch {
@@ -107,8 +113,8 @@ function getGitInfo(filePath: string): { project?: string; remote?: string; bran
 
 function getMachineUserId(): string {
     const machineId = vscode.env.machineId;
-    // Create a deterministic UUID from the machineId
     const hash = crypto.createHash('sha256').update(machineId).update('devtracker-salt').digest('hex');
+    // Format as UUID v4-like string
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 }
 
@@ -116,17 +122,18 @@ export class CoreClient implements vscode.Disposable {
     private state: TrackerState = { ...DEFAULT_STATE };
     private statusBarItem: vscode.StatusBarItem | null = null;
     private lastHeartbeat: number = 0;
-    private heartbeatInterval: number = 30000; // 30 seconds
+    private readonly heartbeatInterval: number = 30_000; // 30 seconds
     private timer: NodeJS.Timeout | null = null;
-    private userId: string = getMachineUserId();
+    private readonly userId: string = getMachineUserId();
 
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly onStateChange: (state: TrackerState) => void,
         private readonly pluginVersion: string,
-        private readonly onInvalidApiKey: () => void = () => { },
+        private readonly onInvalidConfig: () => void = () => { },
     ) {
         context.subscriptions.push(this);
+        log.info(`Machine user ID: ${this.userId}`);
     }
 
     dispose(): void {
@@ -138,11 +145,15 @@ export class CoreClient implements vscode.Disposable {
         return { ...this.state };
     }
 
+    getUserId(): string {
+        return this.userId;
+    }
+
     init(): void {
         this.state.configured = isSupabaseInitialized();
         this.onStateChange(this.state);
         if (this.state.configured) {
-            this.fetchTodayStats();
+            void this.fetchTodayStats();
         }
     }
 
@@ -150,12 +161,18 @@ export class CoreClient implements vscode.Disposable {
         if (!isSupabaseInitialized()) return;
         try {
             const supabase = getSupabase();
+            const today = new Date().toISOString().split('T')[0];
             const { data, error } = await supabase
                 .from('daily_stats')
                 .select('total_seconds, primary_language')
                 .eq('user_id', this.userId)
-                .eq('date', new Date().toISOString().split('T')[0])
+                .eq('date', today)
                 .maybeSingle();
+
+            if (error) {
+                log.warn('Failed to fetch today stats:', error.message);
+                return;
+            }
 
             if (data) {
                 this.state.todaySeconds = data.total_seconds;
@@ -173,13 +190,14 @@ export class CoreClient implements vscode.Disposable {
         this.state.tracking = true;
         this.onStateChange(this.state);
 
+        // Local timer to keep the status bar ticking between heartbeats
         this.timer = setInterval(() => {
-            if (Date.now() - this.lastHeartbeat < 60000) {
+            if (Date.now() - this.lastHeartbeat < 120_000) {
                 this.state.todaySeconds += 60;
                 this.updateStatusBarTime(this.state.todaySeconds);
                 this.onStateChange(this.state);
             }
-        }, 60000);
+        }, 60_000);
     }
 
     pause(): void {
@@ -194,18 +212,16 @@ export class CoreClient implements vscode.Disposable {
 
     async activity(filePath: string, language?: string): Promise<void> {
         if (!this.state.tracking) {
-            log.info('Activity ignored: tracking is disabled');
             return;
         }
         if (!isSupabaseInitialized()) {
-            log.info('Activity ignored: Supabase not initialized');
+            log.warn('Activity ignored: Supabase not initialized');
             return;
         }
 
         const now = Date.now();
         if (now - this.lastHeartbeat < this.heartbeatInterval) return;
 
-        log.info(`Processing activity for: ${filePath} (${language})`);
         this.lastHeartbeat = now;
         this.state.language = language || null;
 
@@ -213,53 +229,66 @@ export class CoreClient implements vscode.Disposable {
         const supabase = getSupabase();
 
         try {
+            // 1. Upsert project (only if inside a git repo)
             let projectId: string | null = null;
             if (git.project) {
-                log.info(`Syncing project: ${git.project}`);
+                log.debug(`Syncing project: ${git.project} (remote: ${git.remote ?? 'none'})`);
+                const upsertPayload: Record<string, unknown> = { name: git.project };
+                if (git.remote) {
+                    upsertPayload.remote_url = git.remote;
+                }
+
                 const { data: project, error: pError } = await supabase
                     .from('projects')
-                    .upsert({ name: git.project, remote_url: git.remote }, { onConflict: 'remote_url' })
+                    .upsert(upsertPayload, { onConflict: git.remote ? 'remote_url' : 'name' })
                     .select('id')
                     .single();
-                
-                if (pError) log.error('Project upsert failed:', pError);
-                projectId = project?.id || null;
+
+                if (pError) {
+                    log.error('Project upsert failed:', pError.message);
+                } else {
+                    projectId = project?.id || null;
+                }
             }
 
-            log.info('Sending heartbeat to Supabase…');
+            // 2. Insert heartbeat
             const { error: hError } = await supabase.from('heartbeats').insert({
                 user_id: this.userId,
                 project_id: projectId,
-                language: language,
-                file_path: git.relativePath || filePath,
-                branch: git.branch,
+                language: language || null,
+                file_path: git.relativePath || path.basename(filePath),
+                branch: git.branch || null,
                 editor: detectEditor(),
                 os: process.platform,
             });
+
             if (hError) {
-                log.error('Heartbeat insert failed:', hError);
+                log.error('Heartbeat insert failed:', hError.message);
                 return;
             }
 
-            const date = new Date().toISOString().split('T')[0];
+            // 3. Update daily stats
+            const today = new Date().toISOString().split('T')[0];
             const { data: stats } = await supabase
                 .from('daily_stats')
                 .select('total_seconds')
                 .eq('user_id', this.userId)
-                .eq('date', date)
+                .eq('date', today)
                 .maybeSingle();
 
             const newTotal = (stats?.total_seconds || 0) + 30;
             const { error: sError } = await supabase.from('daily_stats').upsert({
                 user_id: this.userId,
-                date: date,
+                date: today,
                 total_seconds: newTotal,
-                primary_language: language,
+                primary_language: language || null,
             }, { onConflict: 'user_id,date' });
 
-            if (sError) log.error('Stats upsert failed:', sError);
+            if (sError) {
+                log.error('Stats upsert failed:', sError.message);
+            }
 
-            log.info(`Heartbeat success. Total today: ${newTotal}s`);
+            log.info(`Heartbeat OK — ${git.project || 'unknown'}/${git.branch || '?'} — ${language || '?'} — ${newTotal}s today`);
             this.state.todaySeconds = newTotal;
             this.updateStatusBarTime(newTotal);
             this.onStateChange(this.state);
@@ -269,7 +298,7 @@ export class CoreClient implements vscode.Disposable {
     }
 
     setStatus(message: string): void {
-        vscode.window.showInformationMessage(`DevTracker: Status set to "${message}" (Local only for now)`);
+        vscode.window.showInformationMessage(`DevTracker: Status set to "${message}"`);
     }
 
     reset(): void {
@@ -280,7 +309,10 @@ export class CoreClient implements vscode.Disposable {
     }
 
     private ensureStatusBar(): void {
-        if (this.statusBarItem) return;
+        if (this.statusBarItem) {
+            this.statusBarItem.show();
+            return;
+        }
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         this.statusBarItem.tooltip = 'DevTracker: Coding time today';
         this.statusBarItem.text = '$(clock) 0m';
