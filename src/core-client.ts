@@ -11,6 +11,8 @@ export interface TrackerState {
     codingTime: string;
     todaySeconds: number;
     language: string | null;
+    project: string | null;
+    branch: string | null;
     offline: boolean;
 }
 
@@ -20,6 +22,8 @@ export const DEFAULT_STATE: TrackerState = {
     codingTime: '0m',
     todaySeconds: 0,
     language: null,
+    project: null,
+    branch: null,
     offline: false,
 };
 
@@ -90,31 +94,49 @@ function detectEditor(): string {
     return 'vscode';
 }
 
-function getGitInfo(filePath: string): { project?: string; remote?: string; branch?: string; relativePath?: string } {
+/** 
+ * Runs a git command silently (no stderr output), returns null if the command
+ * fails for any reason (not a git repo, git not installed, etc.)
+ */
+function gitSilent(args: string, cwd: string): string | null {
     try {
-        const dir = path.dirname(filePath);
-        const root = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf8', timeout: 5000 }).trim();
-        const project = path.basename(root);
-
-        let remote: string | undefined;
-        try {
-            remote = execSync('git remote get-url origin', { cwd: dir, encoding: 'utf8', timeout: 5000 }).trim();
-        } catch {
-            // No remote configured — that's fine
-        }
-
-        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, encoding: 'utf8', timeout: 5000 }).trim();
-        const relativePath = path.relative(root, filePath);
-        return { project, remote, branch, relativePath };
+        return execSync(`git ${args}`, {
+            cwd,
+            encoding: 'utf8',
+            timeout: 5000,
+            // Suppress stderr — this prevents "fatal: not a git repository" spam
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
     } catch {
-        return {};
+        return null;
     }
 }
 
+function getGitInfo(filePath: string): {
+    project?: string;
+    remote?: string;
+    branch?: string;
+    relativePath?: string;
+} {
+    const dir = path.dirname(filePath);
+
+    const root = gitSilent('rev-parse --show-toplevel', dir);
+    if (!root) return {};
+
+    const project = path.basename(root);
+    const remote = gitSilent('remote get-url origin', dir) ?? undefined;
+    const branch = gitSilent('rev-parse --abbrev-ref HEAD', dir) ?? undefined;
+    const relativePath = path.relative(root, filePath);
+
+    return { project, remote, branch, relativePath };
+}
+
 function getMachineUserId(): string {
-    const machineId = vscode.env.machineId;
-    const hash = crypto.createHash('sha256').update(machineId).update('devtracker-salt').digest('hex');
-    // Format as UUID v4-like string
+    const hash = crypto
+        .createHash('sha256')
+        .update(vscode.env.machineId)
+        .update('devtracker-salt')
+        .digest('hex');
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 }
 
@@ -122,7 +144,7 @@ export class CoreClient implements vscode.Disposable {
     private state: TrackerState = { ...DEFAULT_STATE };
     private statusBarItem: vscode.StatusBarItem | null = null;
     private lastHeartbeat: number = 0;
-    private readonly heartbeatInterval: number = 30_000; // 30 seconds
+    private readonly heartbeatInterval: number = 30_000;
     private timer: NodeJS.Timeout | null = null;
     private readonly userId: string = getMachineUserId();
 
@@ -173,7 +195,6 @@ export class CoreClient implements vscode.Disposable {
                 log.warn('Failed to fetch today stats:', error.message);
                 return;
             }
-
             if (data) {
                 this.state.todaySeconds = data.total_seconds;
                 this.state.language = data.primary_language;
@@ -190,7 +211,7 @@ export class CoreClient implements vscode.Disposable {
         this.state.tracking = true;
         this.onStateChange(this.state);
 
-        // Local timer to keep the status bar ticking between heartbeats
+        // Tick the local counter every minute when the user is active
         this.timer = setInterval(() => {
             if (Date.now() - this.lastHeartbeat < 120_000) {
                 this.state.todaySeconds += 60;
@@ -211,9 +232,7 @@ export class CoreClient implements vscode.Disposable {
     }
 
     async activity(filePath: string, language?: string): Promise<void> {
-        if (!this.state.tracking) {
-            return;
-        }
+        if (!this.state.tracking) return;
         if (!isSupabaseInitialized()) {
             log.warn('Activity ignored: Supabase not initialized');
             return;
@@ -226,17 +245,22 @@ export class CoreClient implements vscode.Disposable {
         this.state.language = language || null;
 
         const git = getGitInfo(filePath);
+
+        // Update sidebar with project + branch from git info
+        if (git.project) {
+            this.state.project = git.project;
+            this.state.branch = git.branch || null;
+        }
+
         const supabase = getSupabase();
 
         try {
-            // 1. Upsert project (only if inside a git repo)
+            // 1. Upsert project (only when inside a git repo)
             let projectId: string | null = null;
             if (git.project) {
-                log.debug(`Syncing project: ${git.project} (remote: ${git.remote ?? 'none'})`);
+                log.debug(`Syncing project: ${git.project} (${git.remote ?? 'no remote'})`);
                 const upsertPayload: Record<string, unknown> = { name: git.project };
-                if (git.remote) {
-                    upsertPayload.remote_url = git.remote;
-                }
+                if (git.remote) upsertPayload.remote_url = git.remote;
 
                 const { data: project, error: pError } = await supabase
                     .from('projects')
@@ -244,11 +268,8 @@ export class CoreClient implements vscode.Disposable {
                     .select('id')
                     .single();
 
-                if (pError) {
-                    log.error('Project upsert failed:', pError.message);
-                } else {
-                    projectId = project?.id || null;
-                }
+                if (pError) log.error('Project upsert failed:', pError.message);
+                else projectId = project?.id || null;
             }
 
             // 2. Insert heartbeat
@@ -267,7 +288,7 @@ export class CoreClient implements vscode.Disposable {
                 return;
             }
 
-            // 3. Update daily stats
+            // 3. Upsert daily stats
             const today = new Date().toISOString().split('T')[0];
             const { data: stats } = await supabase
                 .from('daily_stats')
@@ -277,27 +298,47 @@ export class CoreClient implements vscode.Disposable {
                 .maybeSingle();
 
             const newTotal = (stats?.total_seconds || 0) + 30;
-            const { error: sError } = await supabase.from('daily_stats').upsert({
-                user_id: this.userId,
-                date: today,
-                total_seconds: newTotal,
-                primary_language: language || null,
-            }, { onConflict: 'user_id,date' });
+            const { error: sError } = await supabase
+                .from('daily_stats')
+                .upsert({
+                    user_id: this.userId,
+                    date: today,
+                    total_seconds: newTotal,
+                    primary_language: language || null,
+                }, { onConflict: 'user_id,date' });
 
-            if (sError) {
-                log.error('Stats upsert failed:', sError.message);
-            }
+            if (sError) log.error('Stats upsert failed:', sError.message);
 
-            log.info(`Heartbeat OK — ${git.project || 'unknown'}/${git.branch || '?'} — ${language || '?'} — ${newTotal}s today`);
+            log.info(
+                `Heartbeat OK — ${git.project ?? '?'}/${git.branch ?? '?'} — ` +
+                `${language ?? '?'} — ${newTotal}s today`,
+            );
+
             this.state.todaySeconds = newTotal;
             this.updateStatusBarTime(newTotal);
             this.onStateChange(this.state);
         } catch (err) {
-            log.error('Heartbeat failed:', err);
+            log.error('Unexpected error in activity:', err);
         }
     }
 
-    setStatus(message: string): void {
+    async setStatus(message: string): Promise<void> {
+        if (isSupabaseInitialized()) {
+            const supabase = getSupabase();
+            try {
+                const { error } = await supabase.from('status_messages').insert({
+                    user_id: this.userId,
+                    message: message
+                });
+                if (error) {
+                    log.error('Failed to save status message to Supabase:', error.message);
+                } else {
+                    log.info(`Status message saved: "${message}"`);
+                }
+            } catch (err) {
+                log.error('Error saving status message:', err);
+            }
+        }
         vscode.window.showInformationMessage(`DevTracker: Status set to "${message}"`);
     }
 

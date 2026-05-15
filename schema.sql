@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS public.daily_stats (
     PRIMARY KEY (user_id, date)
 );
 
+CREATE TABLE IF NOT EXISTS public.status_messages (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL,
+    message     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
 -- 2. Indexes (query performance) ─────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_heartbeats_user_created
@@ -46,6 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_heartbeats_project
 CREATE INDEX IF NOT EXISTS idx_daily_stats_user_date
     ON public.daily_stats (user_id, date DESC);
 
+CREATE INDEX IF NOT EXISTS idx_status_messages_user_created
+    ON public.status_messages (user_id, created_at DESC);
+
 -- 3. Row Level Security ──────────────────────────────────────
 --    Since this is a PRIVATE tracker, we allow all operations.
 --    If you want per-user isolation later, replace these with
@@ -54,12 +64,14 @@ CREATE INDEX IF NOT EXISTS idx_daily_stats_user_date
 ALTER TABLE public.projects    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.heartbeats  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.status_messages ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies if re-running this script
 DO $$ BEGIN
     DROP POLICY IF EXISTS "devtracker_all" ON public.projects;
     DROP POLICY IF EXISTS "devtracker_all" ON public.heartbeats;
     DROP POLICY IF EXISTS "devtracker_all" ON public.daily_stats;
+    DROP POLICY IF EXISTS "devtracker_all" ON public.status_messages;
 END $$;
 
 CREATE POLICY "devtracker_all" ON public.projects
@@ -71,9 +83,13 @@ CREATE POLICY "devtracker_all" ON public.heartbeats
 CREATE POLICY "devtracker_all" ON public.daily_stats
     FOR ALL USING (true) WITH CHECK (true);
 
+CREATE POLICY "devtracker_all" ON public.status_messages
+    FOR ALL USING (true) WITH CHECK (true);
+
 -- 4. Permissions ─────────────────────────────────────────────
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.projects    TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.heartbeats  TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.daily_stats TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.status_messages TO anon, authenticated, service_role;
