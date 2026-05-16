@@ -101,7 +101,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             case 'saveConfig': {
                 let url = String(msg.url ?? '').trim();
                 const key = String(msg.key ?? '').trim();
-                
+
                 if (url && !url.includes('.') && !url.startsWith('http')) {
                     url = `https://${url}.supabase.co`;
                 }
@@ -209,15 +209,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // ── Editor activity forwarding ────────────────────────────────────────
+    const presenceTickMs = 30_000;
+    let lastUserActivity = 0;
+
+    function markUserActivity(doc?: vscode.TextDocument): void {
+        if (!doc || doc.uri.scheme !== 'file') return;
+        lastUserActivity = Date.now();
+    }
+
     function reportActivity(doc: vscode.TextDocument): void {
-        if (doc.uri.scheme !== 'file') return;
+        markUserActivity(doc);
         void client.activity(doc.uri.fsPath, mapLanguageId(doc.languageId));
     }
+
+    function getInactiveGraceMs(): number {
+        const config = vscode.workspace.getConfiguration('codebeats');
+        const minutes = config.get<number>('inactiveGraceMinutes', 10);
+        if (!minutes || minutes <= 0) return 0;
+        return Math.round(minutes * 60_000);
+    }
+
+    function presenceTick(): void {
+        if (!client.getState().tracking) return;
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.uri.scheme !== 'file') return;
+
+        const graceMs = getInactiveGraceMs();
+        const now = Date.now();
+        if (graceMs === 0) return;
+        if (lastUserActivity === 0 || now - lastUserActivity > graceMs) return;
+
+        void client.activity(editor.document.uri.fsPath, mapLanguageId(editor.document.languageId));
+    }
+
+    const presenceTimer = setInterval(presenceTick, presenceTickMs);
+    context.subscriptions.push({ dispose: () => clearInterval(presenceTimer) });
+
+    const initialEditor = vscode.window.activeTextEditor;
+    if (initialEditor) markUserActivity(initialEditor.document);
 
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument((e) => reportActivity(e.document)),
         vscode.window.onDidChangeActiveTextEditor((editor) => {
             if (editor) reportActivity(editor.document);
+        }),
+        vscode.window.onDidChangeTextEditorSelection((e) => markUserActivity(e.textEditor.document)),
+        vscode.window.onDidChangeTextEditorVisibleRanges((e) => markUserActivity(e.textEditor.document)),
+        vscode.window.onDidChangeWindowState((e) => {
+            if (e.focused) markUserActivity(vscode.window.activeTextEditor?.document);
         }),
     );
 

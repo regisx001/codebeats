@@ -62,6 +62,7 @@ Accessible from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `codebeats.trackingEnabled` | `true` | Enable or disable heartbeat tracking |
+| `codebeats.inactiveGraceMinutes` | `10` | Minutes to keep counting after the last editor activity (set to `0` to disable) |
 
 ---
 

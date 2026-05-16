@@ -145,7 +145,8 @@ export class CoreClient implements vscode.Disposable {
     private statusBarItem: vscode.StatusBarItem | null = null;
     private lastHeartbeat: number = 0;
     private readonly heartbeatInterval: number = 30_000;
-    private timer: NodeJS.Timeout | null = null;
+    private readonly idleTimeout: number = 60_000;
+    private pendingSeconds: number = 0;
     private readonly userId: string = getMachineUserId();
 
     constructor(
@@ -179,6 +180,7 @@ export class CoreClient implements vscode.Disposable {
         }
     }
 
+
     async fetchTodayStats(): Promise<void> {
         if (!isSupabaseInitialized()) return;
         try {
@@ -210,23 +212,10 @@ export class CoreClient implements vscode.Disposable {
         this.ensureStatusBar();
         this.state.tracking = true;
         this.onStateChange(this.state);
-
-        // Tick the local counter every minute when the user is active
-        this.timer = setInterval(() => {
-            if (Date.now() - this.lastHeartbeat < 120_000) {
-                this.state.todaySeconds += 60;
-                this.updateStatusBarTime(this.state.todaySeconds);
-                this.onStateChange(this.state);
-            }
-        }, 60_000);
     }
 
     pause(): void {
         this.state.tracking = false;
-        if (this.timer) {
-            clearInterval(this.timer);
-            this.timer = null;
-        }
         this.statusBarItem?.hide();
         this.onStateChange(this.state);
     }
@@ -240,6 +229,9 @@ export class CoreClient implements vscode.Disposable {
 
         const now = Date.now();
         if (now - this.lastHeartbeat < this.heartbeatInterval) return;
+
+        const activeSeconds = this.getActiveSeconds(now);
+        const incrementSeconds = activeSeconds + this.pendingSeconds;
 
         this.lastHeartbeat = now;
         this.state.language = language || null;
@@ -285,19 +277,26 @@ export class CoreClient implements vscode.Disposable {
 
             if (hError) {
                 log.error('Heartbeat insert failed:', hError.message);
+                this.bufferOfflineTime(activeSeconds);
                 return;
             }
 
             // 3. Upsert daily stats
             const today = new Date().toISOString().split('T')[0];
-            const { data: stats } = await supabase
+            const { data: stats, error: statsError } = await supabase
                 .from('daily_stats')
                 .select('total_seconds')
                 .eq('user_id', this.userId)
                 .eq('date', today)
                 .maybeSingle();
 
-            const newTotal = (stats?.total_seconds || 0) + 30;
+            if (statsError) {
+                log.error('Stats fetch failed:', statsError.message);
+                this.bufferOfflineTime(activeSeconds);
+                return;
+            }
+
+            const newTotal = (stats?.total_seconds || 0) + incrementSeconds;
             const { error: sError } = await supabase
                 .from('daily_stats')
                 .upsert({
@@ -307,18 +306,25 @@ export class CoreClient implements vscode.Disposable {
                     primary_language: language || null,
                 }, { onConflict: 'user_id,date' });
 
-            if (sError) log.error('Stats upsert failed:', sError.message);
+            if (sError) {
+                log.error('Stats upsert failed:', sError.message);
+                this.bufferOfflineTime(activeSeconds);
+                return;
+            }
 
             log.info(
                 `Heartbeat OK — ${git.project ?? '?'}/${git.branch ?? '?'} — ` +
                 `${language ?? '?'} — ${newTotal}s today`,
             );
 
+            this.pendingSeconds = 0;
+            this.state.offline = false;
             this.state.todaySeconds = newTotal;
             this.updateStatusBarTime(newTotal);
             this.onStateChange(this.state);
         } catch (err) {
             log.error('Unexpected error in activity:', err);
+            this.bufferOfflineTime(activeSeconds);
         }
     }
 
@@ -346,6 +352,24 @@ export class CoreClient implements vscode.Disposable {
         this.pause();
         this.state = { ...DEFAULT_STATE };
         this.statusBarItem?.hide();
+        this.onStateChange(this.state);
+    }
+
+    private getActiveSeconds(now: number): number {
+        if (this.lastHeartbeat === 0) {
+            return Math.round(Math.min(this.heartbeatInterval, this.idleTimeout) / 1000);
+        }
+        const deltaMs = Math.max(0, now - this.lastHeartbeat);
+        const cappedMs = Math.min(deltaMs, this.idleTimeout);
+        return Math.round(cappedMs / 1000);
+    }
+
+    private bufferOfflineTime(seconds: number): void {
+        if (seconds <= 0) return;
+        this.pendingSeconds += seconds;
+        this.state.offline = true;
+        this.state.todaySeconds += seconds;
+        this.updateStatusBarTime(this.state.todaySeconds);
         this.onStateChange(this.state);
     }
 

@@ -2,7 +2,7 @@
   "name": "codebeats-r",
   "displayName": "CodeBeats",
   "description": "Private development tracker with Supabase backend. Track coding time, languages, and repos privately.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "regisx001",
   "repository": "https://github.com/regisx001/CodeBeats.git",
   "icon": "media/logo.png",
@@ -32,7 +32,7 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^25.8.0",
     "typescript": "^5.0.0"
   },
   "contributes": {
@@ -83,6 +83,12 @@
           "type": "boolean",
           "default": true,
           "description": "Whether CodeBeats heartbeat tracking is active"
+        },
+        "codebeats.inactiveGraceMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "description": "Minutes to keep counting after the last editor activity (use 0 to disable)"
         }
       }
     }
