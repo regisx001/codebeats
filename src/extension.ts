@@ -17,6 +17,7 @@ import {
     initSupabase,
     testConnection,
     fetchLanguageLeaderboard,
+    fetchInsights,
     LeaderboardFilter,
 } from './supabase';
 
@@ -145,6 +146,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 const userId = client.getUserId();
                 const data = await fetchLanguageLeaderboard(userId, filter);
                 sidebar.postLeaderboard(data);
+                break;
+            }
+
+            case 'fetchInsights': {
+                const filter = (msg.filter as LeaderboardFilter) || 'today';
+                const userId = client.getUserId();
+                const data = await fetchInsights(userId, filter);
+                sidebar.postInsights(data);
                 break;
             }
 

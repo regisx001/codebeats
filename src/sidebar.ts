@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { TrackerState } from './core-client';
-import { LangStat } from './supabase';
+import { InsightsPayload, LangStat } from './supabase';
 
 type MessageHandler = (msg: Record<string, unknown>) => void;
 type StateGetter = () => TrackerState;
@@ -36,6 +36,10 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
 
     postLeaderboard(data: LangStat[]): void {
         this.view?.webview.postMessage({ type: 'leaderboard', data });
+    }
+
+    postInsights(data: InsightsPayload): void {
+        this.view?.webview.postMessage({ type: 'insights', data });
     }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -247,10 +251,19 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         gap: 8px;
         padding: 4px 0;
     }
+    .lang-icon {
+        width: 14px;
+        height: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .lang-icon svg { width: 14px; height: 14px; display: block; }
     .lang-name {
         font-size: 11px;
         font-weight: 600;
-        min-width: 72px;
+        min-width: 64px;
         flex-shrink: 0;
         white-space: nowrap;
         overflow: hidden;
@@ -290,6 +303,98 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         text-align: center;
         padding: 8px 0;
         opacity: 0.6;
+    }
+
+    /* ── Insights ─────────────────────────────────────────────── */
+    .insights-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .insight-card {
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-widget-border, #333);
+        border-radius: 6px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-height: 54px;
+    }
+    .insight-label {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: var(--vscode-descriptionForeground);
+    }
+    .insight-value {
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .insight-sub {
+        font-size: 10px;
+        opacity: 0.7;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .insights-details {
+        margin-top: 8px;
+    }
+    .insights-details summary {
+        cursor: pointer;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        user-select: none;
+    }
+    .insights-list {
+        margin-top: 6px;
+    }
+    .insight-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+    }
+    .insight-item-name {
+        font-size: 11px;
+        min-width: 72px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-weight: 600;
+    }
+    .insight-bar-wrap {
+        flex: 1;
+        height: 4px;
+        background: var(--vscode-input-background);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .insight-bar {
+        height: 100%;
+        border-radius: 3px;
+    }
+    .insight-item-time {
+        font-size: 10px;
+        opacity: 0.7;
+        min-width: 42px;
+        text-align: right;
+        flex-shrink: 0;
+    }
+    .insights-status {
+        margin-top: 8px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     /* ── Disconnect link ──────────────────────────────────────── */
@@ -392,6 +497,37 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         </div>
     </div>
 
+    <div class="section">
+        <h3>Insights</h3>
+        <div class="insights-grid">
+            <div class="insight-card">
+                <div class="insight-label">Top project</div>
+                <div class="insight-value" id="insight-top-project">—</div>
+                <div class="insight-sub" id="insight-top-project-time">—</div>
+            </div>
+            <div class="insight-card">
+                <div class="insight-label">Top language</div>
+                <div class="insight-value" id="insight-top-lang">—</div>
+                <div class="insight-sub" id="insight-top-lang-time">—</div>
+            </div>
+            <div class="insight-card">
+                <div class="insight-label">Peak hour</div>
+                <div class="insight-value" id="insight-peak-hour">—</div>
+                <div class="insight-sub" id="insight-peak-hour-time">—</div>
+            </div>
+            <div class="insight-card">
+                <div class="insight-label">Period change</div>
+                <div class="insight-value" id="insight-delta">—</div>
+                <div class="insight-sub" id="insight-period-total">—</div>
+            </div>
+        </div>
+        <details class="insights-details" id="insights-projects-details">
+            <summary>Top projects</summary>
+            <div class="insights-list" id="insights-projects-list"></div>
+        </details>
+        <div class="insights-status" id="insights-status">—</div>
+    </div>
+
     <hr class="separator" />
 
     <!-- Tracking controls -->
@@ -462,6 +598,17 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
     const leaderboardEl    = document.getElementById('leaderboard-content');
     const filterTabs       = document.querySelectorAll('.filter-tab');
     const toast            = document.getElementById('toast');
+    const insightTopProject = document.getElementById('insight-top-project');
+    const insightTopProjectTime = document.getElementById('insight-top-project-time');
+    const insightTopLang = document.getElementById('insight-top-lang');
+    const insightTopLangTime = document.getElementById('insight-top-lang-time');
+    const insightPeakHour = document.getElementById('insight-peak-hour');
+    const insightPeakHourTime = document.getElementById('insight-peak-hour-time');
+    const insightDelta = document.getElementById('insight-delta');
+    const insightPeriodTotal = document.getElementById('insight-period-total');
+    const insightsProjectsDetails = document.getElementById('insights-projects-details');
+    const insightsProjectsList = document.getElementById('insights-projects-list');
+    const insightsStatus = document.getElementById('insights-status');
 
     let toastTimer = null;
     let activeFilter = 'today';
@@ -472,6 +619,38 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         '#59a14f','#edc948','#b07aa1','#ff9da7',
         '#9c755f','#bab0ac',
     ];
+
+    const LANG_ICON_MAP = {
+        'TypeScript': { text: 'TS', color: '#3178c6', textColor: '#ffffff' },
+        'JavaScript': { text: 'JS', color: '#f7df1e', textColor: '#111111' },
+        'React JSX': { text: 'JSX', color: '#61dafb', textColor: '#111111' },
+        'React TSX': { text: 'TSX', color: '#61dafb', textColor: '#111111' },
+        'Python': { text: 'PY', color: '#3776ab', textColor: '#ffffff' },
+        'Go': { text: 'GO', color: '#00add8', textColor: '#ffffff' },
+        'Rust': { text: 'RS', color: '#f74c00', textColor: '#ffffff' },
+        'Java': { text: 'JV', color: '#ea2d2e', textColor: '#ffffff' },
+        'Kotlin': { text: 'KT', color: '#7f52ff', textColor: '#ffffff' },
+        'C#': { text: 'C#', color: '#9b4f96', textColor: '#ffffff' },
+        'C++': { text: 'C+', color: '#00599c', textColor: '#ffffff' },
+        'C': { text: 'C', color: '#5c6bc0', textColor: '#ffffff' },
+        'HTML': { text: 'HT', color: '#e34f26', textColor: '#ffffff' },
+        'CSS': { text: 'CS', color: '#1572b6', textColor: '#ffffff' },
+        'SCSS': { text: 'SC', color: '#c6538c', textColor: '#ffffff' },
+        'SQL': { text: 'SQL', color: '#4479a1', textColor: '#ffffff' },
+        'Markdown': { text: 'MD', color: '#0f8ccf', textColor: '#ffffff' },
+        'JSON': { text: '{}', color: '#9e9e9e', textColor: '#111111' },
+        'YAML': { text: 'Y', color: '#cb171e', textColor: '#ffffff' },
+        'Docker': { text: 'DK', color: '#0db7ed', textColor: '#111111' },
+        'Bash': { text: '$', color: '#4eaa25', textColor: '#ffffff' },
+        'Shell': { text: '$', color: '#4eaa25', textColor: '#ffffff' },
+        'PHP': { text: 'PHP', color: '#777bb4', textColor: '#ffffff' },
+        'Ruby': { text: 'RB', color: '#cc342d', textColor: '#ffffff' },
+        'Swift': { text: 'SW', color: '#f05138', textColor: '#ffffff' },
+        'Dart': { text: 'DT', color: '#0175c2', textColor: '#ffffff' },
+        'Vue': { text: 'VU', color: '#42b883', textColor: '#ffffff' },
+        'Svelte': { text: 'SV', color: '#ff3e00', textColor: '#ffffff' },
+        'Astro': { text: 'AS', color: '#ff5d01', textColor: '#ffffff' },
+    };
 
     // ── Helpers ───────────────────────────────────────────────
     function showToast(msg) {
@@ -487,6 +666,43 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         const m = Math.floor((seconds % 3600) / 60);
         if (h > 0) return h + 'h ' + m + 'm';
         return m + 'm';
+    }
+
+    function fmtHourRange(hour) {
+        const start = String(hour).padStart(2, '0');
+        const end = String((hour + 1) % 24).padStart(2, '0');
+        return start + ':00-' + end + ':00';
+    }
+
+    function fmtRelativeTime(iso) {
+        const t = new Date(iso).getTime();
+        if (!t || Number.isNaN(t)) return '';
+        const minutes = Math.floor((Date.now() - t) / 60000);
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return minutes + 'm ago';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + 'h ago';
+        const days = Math.floor(hours / 24);
+        return days + 'd ago';
+    }
+
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getLangIconSvg(language) {
+        const fallbackText = String(language || '').slice(0, 2).toUpperCase() || '--';
+        const info = LANG_ICON_MAP[language] || { text: fallbackText, color: '#6c757d', textColor: '#ffffff' };
+        const label = escapeHtml(info.text);
+        return '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">' +
+            '<rect x="1" y="1" width="18" height="18" rx="4" fill="' + info.color + '" />' +
+            '<text x="10" y="12.5" text-anchor="middle" font-size="8" font-weight="700" fill="' + info.textColor + '" font-family="var(--vscode-font-family, sans-serif)">' + label + '</text>' +
+        '</svg>';
     }
 
     // ── State render ──────────────────────────────────────────
@@ -522,6 +738,7 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
 
         // Auto-refresh leaderboard on connect
         requestLeaderboard(activeFilter);
+        requestInsights(activeFilter);
     }
 
     // ── Leaderboard render ────────────────────────────────────
@@ -534,19 +751,127 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         leaderboardEl.innerHTML = data.map((item, i) => {
             const pct = max > 0 ? Math.round((item.seconds / max) * 100) : 0;
             const color = PALETTE[i % PALETTE.length];
-            return \`<div class="lang-row">
-                <span class="lang-name" title="\${item.language}">\${item.language}</span>
-                <div class="lang-bar-wrap">
-                    <div class="lang-bar" style="width:\${pct}%;background:\${color}"></div>
-                </div>
-                <span class="lang-time">\${fmtTime(item.seconds)}</span>
-            </div>\`;
+            const icon = getLangIconSvg(item.language);
+            const langLabel = escapeHtml(item.language);
+            return '<div class="lang-row">' +
+                '<span class="lang-icon" title="' + langLabel + '">' + icon + '</span>' +
+                '<span class="lang-name" title="' + langLabel + '">' + langLabel + '</span>' +
+                '<div class="lang-bar-wrap">' +
+                    '<div class="lang-bar" style="width:' + pct + '%;background:' + color + '"></div>' +
+                '</div>' +
+                '<span class="lang-time">' + fmtTime(item.seconds) + '</span>' +
+            '</div>';
         }).join('');
+    }
+
+    function showInsightsLoading() {
+        if (!insightTopProject) return;
+        insightTopProject.textContent = 'Loading...';
+        insightTopProjectTime.textContent = '';
+        insightTopLang.textContent = 'Loading...';
+        insightTopLangTime.textContent = '';
+        insightPeakHour.textContent = 'Loading...';
+        insightPeakHourTime.textContent = '';
+        insightDelta.textContent = 'Loading...';
+        insightPeriodTotal.textContent = '';
+        insightsProjectsList.innerHTML = '';
+        insightsProjectsDetails.classList.add('hidden');
+        insightsStatus.textContent = 'Loading...';
+    }
+
+    function renderInsights(data) {
+        if (!data) return;
+
+        const topProject = data.topProject || null;
+        if (topProject) {
+            insightTopProject.textContent = topProject.project;
+            insightTopProject.title = topProject.project;
+            insightTopProjectTime.textContent = fmtTime(topProject.seconds);
+        } else {
+            insightTopProject.textContent = '—';
+            insightTopProject.title = '';
+            insightTopProjectTime.textContent = '—';
+        }
+
+        const topLang = data.topLanguage || null;
+        if (topLang) {
+            const langLabel = escapeHtml(topLang.language);
+            const icon = getLangIconSvg(topLang.language);
+            insightTopLang.innerHTML = '<span class="lang-icon">' + icon + '</span><span>' + langLabel + '</span>';
+            insightTopLang.title = topLang.language;
+            insightTopLangTime.textContent = fmtTime(topLang.seconds);
+        } else {
+            insightTopLang.textContent = '—';
+            insightTopLang.title = '';
+            insightTopLangTime.textContent = '—';
+        }
+
+        const peak = data.peakHour || null;
+        if (peak) {
+            insightPeakHour.textContent = fmtHourRange(peak.hour);
+            insightPeakHourTime.textContent = fmtTime(peak.seconds);
+        } else {
+            insightPeakHour.textContent = '—';
+            insightPeakHourTime.textContent = '—';
+        }
+
+        if (typeof data.periodDeltaPct === 'number') {
+            const rounded = Math.round(data.periodDeltaPct);
+            const sign = rounded > 0 ? '+' : '';
+            insightDelta.textContent = sign + rounded + '%';
+        } else {
+            insightDelta.textContent = '—';
+        }
+
+        const totalLabel = 'Total ' + fmtTime(data.periodTotalSeconds || 0);
+        if (data.periodDeltaLabel) {
+            insightPeriodTotal.textContent = totalLabel + ' | ' + data.periodDeltaLabel;
+        } else {
+            insightPeriodTotal.textContent = totalLabel;
+        }
+
+        const topProjects = Array.isArray(data.topProjects) ? data.topProjects : [];
+        if (topProjects.length > 0) {
+            const max = topProjects[0].seconds || 1;
+            insightsProjectsList.innerHTML = topProjects.map((item, i) => {
+                const pct = Math.round((item.seconds / max) * 100);
+                const color = PALETTE[i % PALETTE.length];
+                const name = escapeHtml(item.project);
+                return '<div class="insight-item">' +
+                    '<span class="insight-item-name" title="' + name + '">' + name + '</span>' +
+                    '<div class="insight-bar-wrap">' +
+                        '<div class="insight-bar" style="width:' + pct + '%;background:' + color + '"></div>' +
+                    '</div>' +
+                    '<span class="insight-item-time">' + fmtTime(item.seconds) + '</span>' +
+                '</div>';
+            }).join('');
+            insightsProjectsDetails.classList.remove('hidden');
+        } else {
+            insightsProjectsList.innerHTML = '';
+            insightsProjectsDetails.classList.add('hidden');
+        }
+
+        const recent = Array.isArray(data.recentStatus) ? data.recentStatus : [];
+        if (recent.length > 0) {
+            const latest = recent[0];
+            const rel = fmtRelativeTime(latest.created_at);
+            const label = 'Recent: ' + latest.message + (rel ? ' (' + rel + ')' : '');
+            insightsStatus.textContent = label;
+            insightsStatus.title = latest.message;
+        } else {
+            insightsStatus.textContent = 'No recent status messages.';
+            insightsStatus.title = '';
+        }
     }
 
     function requestLeaderboard(filter) {
         leaderboardEl.innerHTML = '<div class="leaderboard-loading">Loading…</div>';
         vscode.postMessage({ type: 'fetchLeaderboard', filter });
+    }
+
+    function requestInsights(filter) {
+        showInsightsLoading();
+        vscode.postMessage({ type: 'fetchInsights', filter });
     }
 
     // ── Event listeners ───────────────────────────────────────
@@ -582,6 +907,7 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
             tab.classList.add('active');
             activeFilter = tab.dataset.filter;
             requestLeaderboard(activeFilter);
+            requestInsights(activeFilter);
         });
     });
 
@@ -597,6 +923,9 @@ export class CodeBeatsSidebarProvider implements vscode.WebviewViewProvider {
         }
         if (msg.type === 'leaderboard') {
             renderLeaderboard(msg.data);
+        }
+        if (msg.type === 'insights') {
+            renderInsights(msg.data);
         }
     });
 </script>

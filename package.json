@@ -2,7 +2,7 @@
   "name": "codebeats-r",
   "displayName": "CodeBeats",
   "description": "Private development tracker with Supabase backend. Track coding time, languages, and repos privately.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "regisx001",
   "repository": "https://github.com/regisx001/CodeBeats.git",
   "icon": "media/logo.png",
